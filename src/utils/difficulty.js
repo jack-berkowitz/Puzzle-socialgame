@@ -2,7 +2,7 @@ export function difficulty(level) {
   return 1 + level / 10;
 }
 
-export const GAME_TYPES = ['train', 'attention', 'memory', 'spatial', 'storm'];
+export const GAME_TYPES = ['train', 'attention', 'memory', 'spatial', 'storm', 'sequence', 'flash', 'nback'];
 
 export const GAME_NAMES = {
   train: 'Train Router',
@@ -10,10 +10,13 @@ export const GAME_NAMES = {
   memory: 'Memory Overload',
   spatial: 'Rapid Fire Spatial',
   storm: 'Storm Chaser',
+  sequence: 'Sequence Spotter',
+  flash: 'Flash Judge',
+  nback: 'Dual N-Back',
 };
 
 // Deterministic, never repeats two levels in a row.
-// (level * 7) % 5 is non-repeating since gcd(7,5)=1.
+// (level * 7) % 8 is non-repeating since gcd(7,8)=1.
 export function gameTypeForLevel(level) {
   return GAME_TYPES[((level | 0) * 7) % GAME_TYPES.length];
 }
@@ -56,12 +59,12 @@ export function tier(level) {
 export function trainParams(level) {
   const t = tier(level);
   if (t === 'low') {
-    return { trains: 2, junctions: 1, speed: 60, lives: 3, layout: 'simple' };
+    return { trains: 2, junctions: 1, speed: 50, lives: 3, layout: 'simple', totalSends: 8, sendIntervalMs: 5000 };
   }
   if (t === 'mid') {
-    return { trains: 3 + Math.min(1, level - 6), junctions: 2, speed: 90, lives: 3, layout: 'branch' };
+    return { trains: 3 + Math.min(1, level - 6), junctions: 2, speed: 70, lives: 3, layout: 'branch', totalSends: 10, sendIntervalMs: 4000 };
   }
-  return { trains: 5, junctions: 3, speed: 120, lives: 3, layout: 'complex' };
+  return { trains: 5, junctions: 3, speed: 100, lives: 3, layout: 'complex', totalSends: 12, sendIntervalMs: 3500 };
 }
 
 export function attentionParams(level) {
@@ -163,6 +166,96 @@ export function stormParams(level) {
     wind: true,
     questionEveryMs: 4500,
     durationMs: 75000,
+  };
+}
+
+export function sequenceParams(level) {
+  const t = tier(level);
+  if (t === 'low') {
+    return {
+      sequenceLength: 3,
+      flashMs: 1000,
+      totalDigits: 60,
+      targetCount: 8,
+      durationMs: 75000,
+    };
+  }
+  if (t === 'mid') {
+    return {
+      sequenceLength: 3,
+      flashMs: 800,
+      totalDigits: 80,
+      targetCount: 10,
+      durationMs: 80000,
+    };
+  }
+  return {
+    sequenceLength: 4,
+    flashMs: Math.max(550, 700 - level * 5),
+    totalDigits: 100,
+    targetCount: 12,
+    durationMs: 90000,
+  };
+}
+
+export function flashParams(level) {
+  const t = tier(level);
+  if (t === 'low') {
+    return {
+      flashMs: 400,
+      responseMs: 1500,
+      totalRounds: 20,
+      noGoChance: 0.25,
+      targetChangeEvery: 10,
+    };
+  }
+  if (t === 'mid') {
+    return {
+      flashMs: 280,
+      responseMs: 1200,
+      totalRounds: 25,
+      noGoChance: 0.3,
+      targetChangeEvery: 8,
+    };
+  }
+  return {
+    flashMs: Math.max(150, 220 - level * 3),
+    responseMs: Math.max(800, 1000 - level * 8),
+    totalRounds: 30,
+    noGoChance: 0.35,
+    targetChangeEvery: 6,
+  };
+}
+
+export function nbackParams(level) {
+  const t = tier(level);
+  if (t === 'low') {
+    return {
+      startN: 1,
+      maxN: 2,
+      intervalMs: 3000,
+      totalTrials: 25,
+      matchChance: 0.35,
+      promoteAfter: 6,
+    };
+  }
+  if (t === 'mid') {
+    return {
+      startN: 2,
+      maxN: 3,
+      intervalMs: 2700,
+      totalTrials: 30,
+      matchChance: 0.35,
+      promoteAfter: 5,
+    };
+  }
+  return {
+    startN: 2,
+    maxN: 4,
+    intervalMs: Math.max(2000, 2500 - level * 15),
+    totalTrials: 35,
+    matchChance: 0.35,
+    promoteAfter: 5,
   };
 }
 

@@ -15,6 +15,7 @@ import LevelNode from '../components/LevelNode';
 import PuzzleHeader from '../components/PuzzleHeader';
 import FriendAvatar from '../components/FriendAvatar';
 import { KEYS, getState } from '../utils/storage';
+import { GAME_TYPES, GAME_NAMES } from '../utils/difficulty';
 
 const VISIBLE_AHEAD = 8;
 const VISIBLE_BEHIND = 6;
@@ -177,6 +178,22 @@ export default function PuzzleMapScreen({ navigation }) {
         completed={completedLevels.length}
       />
 
+      {/* Dev: Test individual games */}
+      <View style={styles.devSection}>
+        <Text style={styles.devTitle}>Test Games</Text>
+        <View style={styles.devGrid}>
+          {GAME_TYPES.map((gt) => (
+            <Pressable
+              key={gt}
+              style={styles.devBtn}
+              onPress={() => navigation.navigate('Puzzle', { level: currentLevel, gameType: gt })}
+            >
+              <Text style={styles.devBtnTxt}>{GAME_NAMES[gt]}</Text>
+            </Pressable>
+          ))}
+        </View>
+      </View>
+
       <ScrollView
         ref={scrollRef}
         contentContainerStyle={styles.scrollContent}
@@ -330,5 +347,38 @@ const styles = StyleSheet.create({
     ...fonts.uiBold,
     fontSize: 10,
     color: colors.textDim,
+  },
+  devSection: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.divider,
+    marginBottom: 4,
+  },
+  devTitle: {
+    ...fonts.uiBold,
+    fontSize: 12,
+    color: colors.textDim,
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    marginBottom: 8,
+  },
+  devGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  devBtn: {
+    backgroundColor: colors.surface,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  devBtnTxt: {
+    ...fonts.uiMedium,
+    fontSize: 11,
+    color: colors.text,
   },
 });

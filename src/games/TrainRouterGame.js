@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -27,10 +27,6 @@ function colorAt(i) {
   return order[i % order.length];
 }
 
-// Build a layout per level. All layouts use a shared shape:
-// spawns at top, junctions in the middle, stations at bottom.
-// Each spawn has a fixed downward path to one junction.
-// Each junction has two outputs (left/right) to two of the stations.
 function buildLayout(level) {
   const params = trainParams(level);
   const W = Math.min(SCREEN_W - 24, 360);
@@ -38,7 +34,6 @@ function buildLayout(level) {
   const trainCount = Math.min(params.trains, 5);
 
   if (params.layout === 'simple') {
-    // 2 trains, 1 junction each, 2 stations
     const stations = [
       { id: 'sR', color: 'red', x: W * 0.18, y: H - 30 },
       { id: 'sB', color: 'blue', x: W * 0.82, y: H - 30 },
@@ -63,7 +58,6 @@ function buildLayout(level) {
   }
 
   if (params.layout === 'branch') {
-    // 3-4 trains, 2 junctions paths sharing intermediate routing, 3 stations
     const stations = [
       { id: 'sR', color: 'red', x: W * 0.15, y: H - 30 },
       { id: 'sG', color: 'green', x: W * 0.5, y: H - 30 },
@@ -94,7 +88,7 @@ function buildLayout(level) {
     return { W, H, spawns, junctions, stations, params };
   }
 
-  // complex: 5 trains, 3 stations including a decoy color
+  // complex
   const stations = [
     { id: 'sR', color: 'red', x: W * 0.12, y: H - 30 },
     { id: 'sG', color: 'green', x: W * 0.38, y: H - 30 },
@@ -130,93 +124,65 @@ function buildLayout(level) {
 export default function TrainRouterGame({ level, onComplete, onFailRound }) {
   const layout = useMemo(() => buildLayout(level), [level]);
   const params = layout.params;
+  const totalSends = params.totalSends || 8;
+
   const [junctions, setJunctions] = useState(layout.junctions);
-  const [trains, setTrains] = useState(() =>
-    layout.spawns.map((s, i) => ({
-      id: s.id,
-      color: s.color,
-      x: new Animated.Value(s.x),
-      y: new Animated.Value(s.y),
-      atNodeId: s.id,
-      arrived: false,
-      crashed: false,
-      delay: i * 600,
-    }))
-  );
+  const [activeTrains, setActiveTrains] = useState([]);
   const [lives, setLives] = useState(params.lives);
-  const [done, setDone] = useState(false);
   const [arrivedCount, setArrivedCount] = useState(0);
+  const [sendCount, setSendCount] = useState(0);
+  const [done, setDone] = useState(false);
+
   const livesRef = useRef(params.lives);
   const arrivedRef = useRef(0);
-  const totalTrainsRef = useRef(layout.spawns.length);
+  const resolvedRef = useRef(0);
   const completedRef = useRef(false);
   const failedAnyRef = useRef(false);
+  const junctionsRef = useRef(layout.junctions);
+  const timersRef = useRef([]);
+  const trainIdCounter = useRef(0);
 
+  // Available station colors for random assignment
+  const stationColors = useMemo(() => layout.stations.map((s) => s.color), [layout]);
+
+  // Keep junctions ref in sync
   useEffect(() => {
-    trains.forEach((train, idx) => {
-      const startNode = layout.spawns.find((s) => s.id === train.id);
-      const junction = layout.junctions.find((j) => j.id === `j${idx}`);
-      if (!startNode || !junction) return;
+    junctionsRef.current = junctions;
+  }, [junctions]);
 
-      const dx = junction.x - startNode.x;
-      const dy = junction.y - startNode.y;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      const duration = (dist / params.speed) * 1000;
+  const animateTrain = useCallback((train, spawnIdx) => {
+    const spawn = layout.spawns[spawnIdx];
+    const junction = layout.junctions[spawnIdx];
+    if (!spawn || !junction) return;
 
-      const goToJunction = () => {
-        Animated.parallel([
-          Animated.timing(train.x, {
-            toValue: junction.x,
-            duration,
-            easing: Easing.linear,
-            useNativeDriver: false,
-          }),
-          Animated.timing(train.y, {
-            toValue: junction.y,
-            duration,
-            easing: Easing.linear,
-            useNativeDriver: false,
-          }),
-        ]).start(({ finished }) => {
-          if (!finished) return;
-          handleAtJunction(train, junction);
-        });
-      };
+    const dx1 = junction.x - spawn.x;
+    const dy1 = junction.y - spawn.y;
+    const dist1 = Math.sqrt(dx1 * dx1 + dy1 * dy1);
+    const dur1 = (dist1 / params.speed) * 1000;
 
-      const id = setTimeout(goToJunction, train.delay);
-      return () => clearTimeout(id);
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    Animated.parallel([
+      Animated.timing(train.x, { toValue: junction.x, duration: dur1, easing: Easing.linear, useNativeDriver: false }),
+      Animated.timing(train.y, { toValue: junction.y, duration: dur1, easing: Easing.linear, useNativeDriver: false }),
+    ]).start(({ finished }) => {
+      if (!finished || completedRef.current) return;
 
-  const handleAtJunction = (train, junctionDataAtMount) => {
-    // Read current junction state from latest junctions
-    setJunctions((latest) => {
-      const j = latest.find((x) => x.id === junctionDataAtMount.id) || junctionDataAtMount;
+      // Read latest junction state
+      const j = junctionsRef.current.find((x) => x.id === junction.id) || junction;
       const targetStationId = j.state === 'left' ? j.leftTo : j.rightTo;
       const station = layout.stations.find((s) => s.id === targetStationId);
-      if (!station) return latest;
+      if (!station) return;
 
-      const dx = station.x - j.x;
-      const dy = station.y - j.y;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      const duration = (dist / params.speed) * 1000;
+      const dx2 = station.x - j.x;
+      const dy2 = station.y - j.y;
+      const dist2 = Math.sqrt(dx2 * dx2 + dy2 * dy2);
+      const dur2 = (dist2 / params.speed) * 1000;
 
       Animated.parallel([
-        Animated.timing(train.x, {
-          toValue: station.x,
-          duration,
-          easing: Easing.linear,
-          useNativeDriver: false,
-        }),
-        Animated.timing(train.y, {
-          toValue: station.y,
-          duration,
-          easing: Easing.linear,
-          useNativeDriver: false,
-        }),
-      ]).start(({ finished }) => {
-        if (!finished) return;
+        Animated.timing(train.x, { toValue: station.x, duration: dur2, easing: Easing.linear, useNativeDriver: false }),
+        Animated.timing(train.y, { toValue: station.y, duration: dur2, easing: Easing.linear, useNativeDriver: false }),
+      ]).start(({ finished: f2 }) => {
+        if (!f2 || completedRef.current) return;
+
         if (station.color === train.color) {
           arrivedRef.current += 1;
           setArrivedCount(arrivedRef.current);
@@ -230,34 +196,76 @@ export default function TrainRouterGame({ level, onComplete, onFailRound }) {
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
           onFailRound?.();
         }
-        checkEndConditions();
+
+        resolvedRef.current += 1;
+        checkEnd();
       });
-      return latest;
     });
-  };
+  }, [layout, params.speed, onFailRound]);
 
-  const checkEndConditions = () => {
+  const sendOneTrain = useCallback((sendIndex) => {
     if (completedRef.current) return;
-    const total = totalTrainsRef.current;
-    const arrived = arrivedRef.current;
-    const livesLeft = livesRef.current;
-    const allDone = trains.every((t) => t.arrived || t.crashed) || arrived + (total - livesLeft) >= total;
+    setSendCount(sendIndex + 1);
 
-    if (livesLeft <= 0 || allDone) {
+    // Pick a random spawn track and random color
+    const spawnIdx = Math.floor(Math.random() * layout.spawns.length);
+    const spawn = layout.spawns[spawnIdx];
+    const trainColor = stationColors[Math.floor(Math.random() * stationColors.length)];
+
+    const id = `t${trainIdCounter.current++}`;
+    const train = {
+      id,
+      color: trainColor,
+      x: new Animated.Value(spawn.x),
+      y: new Animated.Value(spawn.y),
+      arrived: false,
+      crashed: false,
+    };
+
+    setActiveTrains((prev) => [...prev, train]);
+    animateTrain(train, spawnIdx);
+  }, [layout, stationColors, animateTrain]);
+
+  // Send trains one at a time on an interval
+  useEffect(() => {
+    sendOneTrain(0);
+
+    for (let i = 1; i < totalSends; i++) {
+      const timerId = setTimeout(() => {
+        if (completedRef.current) return;
+        sendOneTrain(i);
+      }, i * (params.sendIntervalMs || 5000));
+      timersRef.current.push(timerId);
+    }
+
+    return () => {
+      timersRef.current.forEach(clearTimeout);
+    };
+  }, [totalSends, params.sendIntervalMs, sendOneTrain]);
+
+  const checkEnd = useCallback(() => {
+    if (completedRef.current) return;
+    const livesLeft = livesRef.current;
+
+    if (livesLeft <= 0) {
       completedRef.current = true;
       setDone(true);
-      const score = computeScore(arrivedRef.current, total, livesLeft);
-      onComplete?.({
-        firstTry: !failedAnyRef.current,
-        score,
-        arrived,
-        total,
-        livesLeft,
-      });
+      timersRef.current.forEach(clearTimeout);
+      const score = computeScore(arrivedRef.current, totalSends, livesLeft);
+      onComplete?.({ firstTry: !failedAnyRef.current, score, arrived: arrivedRef.current, total: totalSends, livesLeft });
+      return;
     }
-  };
+
+    if (resolvedRef.current >= totalSends) {
+      completedRef.current = true;
+      setDone(true);
+      const score = computeScore(arrivedRef.current, totalSends, livesLeft);
+      onComplete?.({ firstTry: !failedAnyRef.current, score, arrived: arrivedRef.current, total: totalSends, livesLeft });
+    }
+  }, [totalSends, onComplete]);
 
   const handleJunctionTap = (junctionId) => {
+    if (done) return;
     Haptics.selectionAsync();
     setJunctions((prev) =>
       prev.map((j) =>
@@ -275,7 +283,7 @@ export default function TrainRouterGame({ level, onComplete, onFailRound }) {
           ))}
         </Text>
         <Text style={styles.subhead}>
-          {arrivedCount} / {layout.spawns.length} arrived
+          {arrivedCount}/{totalSends} arrived  ·  Train {sendCount}/{totalSends}
         </Text>
       </View>
 
@@ -284,34 +292,18 @@ export default function TrainRouterGame({ level, onComplete, onFailRound }) {
         {layout.spawns.map((s, i) => {
           const j = layout.junctions[i];
           if (!j) return null;
-          return (
-            <Line key={`tr-${s.id}`} from={s} to={j} dim />
-          );
+          return <Line key={`tr-${s.id}`} from={s} to={j} dim />;
         })}
 
-        {/* tracks: junction-to-station (both possibilities visible) */}
+        {/* tracks: junction-to-station */}
         {layout.junctions.map((j) => {
           const left = layout.stations.find((s) => s.id === j.leftTo);
           const right = layout.stations.find((s) => s.id === j.rightTo);
           const cur = junctions.find((x) => x.id === j.id) || j;
           return (
             <View key={`tracks-${j.id}`}>
-              {left && (
-                <Line
-                  from={j}
-                  to={left}
-                  active={cur.state === 'left'}
-                  color={TRAIN_COLORS[left.color]}
-                />
-              )}
-              {right && (
-                <Line
-                  from={j}
-                  to={right}
-                  active={cur.state === 'right'}
-                  color={TRAIN_COLORS[right.color]}
-                />
-              )}
+              {left && <Line from={j} to={left} active={cur.state === 'left'} color={TRAIN_COLORS[left.color]} />}
+              {right && <Line from={j} to={right} active={cur.state === 'right'} color={TRAIN_COLORS[right.color]} />}
             </View>
           );
         })}
@@ -320,14 +312,7 @@ export default function TrainRouterGame({ level, onComplete, onFailRound }) {
         {layout.stations.map((s) => (
           <View
             key={s.id}
-            style={[
-              styles.station,
-              {
-                left: s.x - 22,
-                top: s.y - 22,
-                backgroundColor: TRAIN_COLORS[s.color],
-              },
-            ]}
+            style={[styles.station, { left: s.x - 22, top: s.y - 22, backgroundColor: TRAIN_COLORS[s.color] }]}
           >
             <Text style={styles.stationLabel}>{s.color[0].toUpperCase()}</Text>
           </View>
@@ -337,14 +322,7 @@ export default function TrainRouterGame({ level, onComplete, onFailRound }) {
         {layout.spawns.map((s) => (
           <View
             key={s.id}
-            style={[
-              styles.spawn,
-              {
-                left: s.x - 8,
-                top: s.y - 8,
-                borderColor: TRAIN_COLORS[s.color],
-              },
-            ]}
+            style={[styles.spawn, { left: s.x - 8, top: s.y - 8, borderColor: TRAIN_COLORS[s.color] }]}
           />
         ))}
 
@@ -352,21 +330,15 @@ export default function TrainRouterGame({ level, onComplete, onFailRound }) {
         {junctions.map((j) => (
           <Pressable
             key={`btn-${j.id}`}
-            onPress={() => !done && handleJunctionTap(j.id)}
-            style={[
-              styles.junction,
-              {
-                left: j.x - 18,
-                top: j.y - 18,
-              },
-            ]}
+            onPress={() => handleJunctionTap(j.id)}
+            style={[styles.junction, { left: j.x - 18, top: j.y - 18 }]}
           >
             <Text style={styles.junctionArrow}>{j.state === 'left' ? '↙' : '↘'}</Text>
           </Pressable>
         ))}
 
         {/* trains */}
-        {trains.map((t) => (
+        {activeTrains.map((t) => (
           <Animated.View
             key={t.id}
             style={[
