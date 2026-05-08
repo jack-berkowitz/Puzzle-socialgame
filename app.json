@@ -1,0 +1,29 @@
+{
+  "expo": {
+    "name": "Modinsta",
+    "slug": "modinsta",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#0a0a14",
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#0a0a14"
+    },
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.modinsta.app"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#0a0a14"
+      },
+      "package": "com.modinsta.app"
+    },
+    "web": {
+      "bundler": "metro"
+    },
+    "plugins": []
+  }
+}
